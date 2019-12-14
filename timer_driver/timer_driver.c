@@ -17,29 +17,32 @@
 
 #include <linux/interrupt.h> //irqreturn_t, request_irq
 
-#define BUFF_SIZE 20
-#define DRIVER_NAME "timer"
-
-
-#define XIL_AXI_TIMER_TCSR_OFFSET		0x0
+// REGISTER CONSTANTS
+#define XIL_AXI_TIMER_TCSR_OFFSET	0x0
 #define XIL_AXI_TIMER_TLR_OFFSET		0x4
 #define XIL_AXI_TIMER_TCR_OFFSET		0x8
 
-#define XIL_AXI_TIMER_CSR_CASC_MASK		0x00000800
+#define XIL_AXI_TIMER_CSR_CASC_MASK	0x00000800
 #define XIL_AXI_TIMER_CSR_ENABLE_ALL_MASK	0x00000400
 #define XIL_AXI_TIMER_CSR_ENABLE_PWM_MASK	0x00000200
-#define XIL_AXI_TIMER_CSR_INT_OCCURED_MASK	0x00000100
-#define XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK	0x00000080
-#define XIL_AXI_TIMER_CSR_ENABLE_INT_MASK	0x00000040
-#define XIL_AXI_TIMER_CSR_LOAD_MASK		0x00000020
-#define XIL_AXI_TIMER_CSR_AUTO_RELOAD_MASK	0x00000010
-#define XIL_AXI_TIMER_CSR_EXT_CAPTURE_MASK	0x00000008
-#define XIL_AXI_TIMER_CSR_EXT_GENERATE_MASK	0x00000004
-#define XIL_AXI_TIMER_CSR_DOWN_COUNT_MASK	0x00000002
-#define XIL_AXI_TIMER_CSR_CAPTURE_MODE_MASK	0x00000001
+#define XIL_AXI_TIMER_CSR_INT_OCCURED_MASK 0x00000100
+#define XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK 0x00000080
+#define XIL_AXI_TIMER_CSR_ENABLE_INT_MASK 0x00000040
+#define XIL_AXI_TIMER_CSR_LOAD_MASK 0x00000020
+#define XIL_AXI_TIMER_CSR_AUTO_RELOAD_MASK 0x00000010
+#define XIL_AXI_TIMER_CSR_EXT_CAPTURE_MASK 0x00000008
+#define XIL_AXI_TIMER_CSR_EXT_GENERATE_MASK 0x00000004
+#define XIL_AXI_TIMER_CSR_DOWN_COUNT_MASK 0x00000002
+#define XIL_AXI_TIMER_CSR_CAPTURE_MODE_MASK 0x00000001
 
-#define TIMER_CNT	0xF8000000
+#define BUFF_SIZE 20
+#define DRIVER_NAME "timer"
+#define DEVICE_NAME "xilaxitimer"
+
 MODULE_LICENSE("Dual BSD/GPL");
+MODULE_AUTHOR ("Xilinx");
+MODULE_DESCRIPTION("Test Driver for Zynq PL AXI Timer.");
+MODULE_ALIAS("custom:xilaxitimer");
 
 struct timer_info {
 	unsigned long mem_start;
@@ -79,7 +82,7 @@ struct file_operations my_fops =
 };
 
 static struct of_device_id timer_of_match[] = {
-	{ .compatible = "timer_gpio", },
+	{ .compatible = "xlnx,xps-timer-1.00.a", },
 	{ /* end of list */ },
 };
 
@@ -105,22 +108,22 @@ static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)
 
 	// Check Timer Counter Value
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
-	printk(KERN_INFO "xilaxitimer_isr: Interrupt Occurred ! Timer Count = 0x%08X\n",data);
+	printk(KERN_INFO "xilaxitimer_isr: Interrupt %d occurred !\n",i_cnt);
 
 	// Clear Interrupt
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data | XIL_AXI_TIMER_CSR_INT_OCCURED_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
-	// Disable Timer after i_num interrupts
+	// Increment number of interrupts that have occured
 	i_cnt++;
-
+	// Disable Timer after i_num interrupts
 	if (i_cnt>=i_num)
 	{
-		i_cnt = 0;
-		printk(KERN_NOTICE "xilaxitimer_isr: all of the interrupts have occurred. Disabling timer");
+		printk(KERN_NOTICE "xilaxitimer_isr: All of the interrupts have occurred. Disabling timer\n");
 		data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 		iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK), tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+		i_cnt = 0;
 	}
 
 	return IRQ_HANDLED;
@@ -183,7 +186,7 @@ static int timer_probe(struct platform_device *pdev)
 	tp->mem_end = r_mem->end;
 
 	// Reserve that memory space for this driver
-	if (!request_mem_region(tp->mem_start,tp->mem_end - tp->mem_start + 1,	DRIVER_NAME))
+	if (!request_mem_region(tp->mem_start,tp->mem_end - tp->mem_start + 1,	DEVICE_NAME))
 	{
 		printk(KERN_ALERT "xilaxitimer_probe: Could not lock memory region at %p\n",(void *)tp->mem_start);
 		rc = -EBUSY;
@@ -207,7 +210,7 @@ static int timer_probe(struct platform_device *pdev)
 	}
 
 	// Reserve interrupt number for this driver
-	if (request_irq(tp->irq_num, xilaxitimer_isr, 0, DRIVER_NAME, NULL)) {
+	if (request_irq(tp->irq_num, xilaxitimer_isr, 0, DEVICE_NAME, NULL)) {
 		printk(KERN_ERR "xilaxitimer_probe: Cannot register IRQ %d\n", tp->irq_num);
 		rc = -EIO;
 		goto error3;
@@ -272,16 +275,16 @@ ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_
 ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length, loff_t *offset) 
 {
 	char buff[BUFF_SIZE];
-	unsigned int millis = 0;
-	unsigned int number = 0;
+	int millis = 0;
+	int number = 0;
 	int ret = 0;
-	ret = copy_from_user(buff, buffer, number);
+	ret = copy_from_user(buff, buffer, length);
 	if(ret)
 		return -EFAULT;
-	buff[length - 1] = '\0';
+	buff[length] = '\0';
 
 	ret = sscanf(buff,"%d,%d",&number,&millis);
-	if(ret==2)//two parameters parsed in sscanf
+	if(ret == 2)//two parameters parsed in sscanf
 	{
 
 		if (millis > 40000)
@@ -290,7 +293,7 @@ ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length
 		}
 		else
 		{
-			printk(KERN_INFO "xilaxitimer_write: Startiing timer for %d interrupts every %d miliseconds \n",number,millis);
+			printk(KERN_INFO "xilaxitimer_write: Starting timer for %d interrupts every %d miliseconds \n",number,millis);
 			i_num = number;
 			setup_and_start_timer(millis);
 		}
