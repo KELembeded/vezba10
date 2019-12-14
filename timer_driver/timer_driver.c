@@ -101,11 +101,11 @@ MODULE_DEVICE_TABLE(of, timer_of_match);
 
 static irqreturn_t xilaxitimer_isr(int irq,void*dev_id)		
 {      
-	unsigned int data;
+	unsigned int data = 0;
 
 	// Check Timer Counter Value
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCR_OFFSET);
-	printk(KERN INFO "xilaxitimer_isr: Interrupt Occurred ! Timer Count = 0x%08X\n",data);
+	printk(KERN_INFO "xilaxitimer_isr: Interrupt Occurred ! Timer Count = 0x%08X\n",data);
 
 	// Clear Interrupt
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
@@ -133,7 +133,7 @@ static void setup_and_start_timer(unsigned int milliseconds)
 	// Disable Timer Counter
 	unsigned int timer_load;
 	unsigned int zero = 0;
-	unsigned int data;
+	unsigned int data = 0;
 	timer_load = zero - milliseconds*100000;
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
@@ -183,7 +183,7 @@ static int timer_probe(struct platform_device *pdev)
 	tp->mem_end = r_mem->end;
 
 	// Reserve that memory space for this driver
-	if (!request_mem_region(tp->mem_start,lp->mem_end - lp->mem_start + 1,	DRIVER_NAME))
+	if (!request_mem_region(tp->mem_start,tp->mem_end - tp->mem_start + 1,	DRIVER_NAME))
 	{
 		printk(KERN_ALERT "xilaxitimer_probe: Could not lock memory region at %p\n",(void *)tp->mem_start);
 		rc = -EBUSY;
@@ -191,7 +191,7 @@ static int timer_probe(struct platform_device *pdev)
 	}
 
 	// Remap phisical to virtual adresses
-	tp->base_addr = ioremap(lp->mem_start, lp->mem_end - lp->mem_start + 1);
+	tp->base_addr = ioremap(tp->mem_start, tp->mem_end - tp->mem_start + 1);
 	if (!tp->base_addr) {
 		printk(KERN_ALERT "xilaxitimer_probe: Could not allocate memory\n");
 		rc = -EIO;
@@ -207,7 +207,7 @@ static int timer_probe(struct platform_device *pdev)
 	}
 
 	// Reserve interrupt number for this driver
-	if (request_irq(tp->irq_num, xilaxitimer_isr, 0, DEVICE_NAME, NULL)) {
+	if (request_irq(tp->irq_num, xilaxitimer_isr, 0, DRIVER_NAME, NULL)) {
 		printk(KERN_ERR "xilaxitimer_probe: Cannot register IRQ %d\n", tp->irq_num);
 		rc = -EIO;
 		goto error3;
@@ -223,7 +223,7 @@ static int timer_probe(struct platform_device *pdev)
 error3:
 	iounmap(tp->base_addr);
 error2:
-	release_mem_region(tp->mem_start, lp->mem_end - lp->mem_start + 1);
+	release_mem_region(tp->mem_start, tp->mem_end - tp->mem_start + 1);
 	kfree(tp);
 error1:
 	return rc;
@@ -232,14 +232,15 @@ error1:
 static int timer_remove(struct platform_device *pdev)
 {
 	// Disable timer
+	unsigned int data=0;
 	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	iowrite32(data & ~(XIL_AXI_TIMER_CSR_ENABLE_TMR_MASK),
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 	// Free resources taken in probe
-	free_irq(tp->irq_num);
+	free_irq(tp->irq_num, NULL);
 	iowrite32(0, tp->base_addr);
 	iounmap(tp->base_addr);
-	release_mem_region(tp->mem_start, lp->mem_end - lp->mem_start + 1);
+	release_mem_region(tp->mem_start, tp->mem_end - tp->mem_start + 1);
 	kfree(tp);
 	printk(KERN_WARNING "xilaxitimer_remove: Timer driver removed\n");
 	return 0;
@@ -270,19 +271,20 @@ ssize_t timer_read(struct file *pfile, char __user *buffer, size_t length, loff_
 
 ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length, loff_t *offset) 
 {
-	char buffer[BUFF_SIZE];
-	unsigned int millis,number;
+	char buff[BUFF_SIZE];
+	unsigned int millis = 0;
+	unsigned int number = 0;
 	int ret = 0;
-	ret = copy_from_user(buffer, buf, count);
+	ret = copy_from_user(buff, buffer, number);
 	if(ret)
 		return -EFAULT;
-	buffer[count - 1] = '\0';
+	buff[length - 1] = '\0';
 
 	ret = sscanf(buff,"%d,%d",&number,&millis);
 	if(ret==2)//two parameters parsed in sscanf
 	{
 
-		if (timer_ms > 40000)
+		if (millis > 40000)
 		{
 			printk(KERN_WARNING "xilaxitimer_write: Maximum period exceeded, enter something less than 40000 \n");
 		}
@@ -294,8 +296,11 @@ ssize_t timer_write(struct file *pfile, const char __user *buffer, size_t length
 		}
 
 	}
-
-	return count;
+	else
+	{
+		printk(KERN_WARNING "xilaxitimer_write: Wrong format, expected n,t \n\t n-number of interrupts\n\t t-time in ms between interrupts\n");
+	}
+	return length;
 }
 
 //***************************************************
