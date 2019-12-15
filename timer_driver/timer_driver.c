@@ -144,13 +144,19 @@ static void setup_and_start_timer(unsigned int milliseconds)
 
 	// Set Timer Counter
 	iowrite32(timer_load, tp->base_addr + XIL_AXI_TIMER_TLR_OFFSET);
-	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TLR_OFFSET);
-	//printk("xilaxitimer_init: Set timer count 0x%08X\n",data);
 
-	// Set Timer mode and enable interrupt
-	iowrite32(XIL_AXI_TIMER_CSR_LOAD_MASK,
+	// Load initial value into counter from load register
+	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	iowrite32(data | XIL_AXI_TIMER_CSR_LOAD_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
-	iowrite32(XIL_AXI_TIMER_CSR_ENABLE_INT_MASK | XIL_AXI_TIMER_CSR_AUTO_RELOAD_MASK,
+
+	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	iowrite32(data & ~(XIL_AXI_TIMER_CSR_LOAD_MASK),
+			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+
+	// Enable interrupts and autoreload
+	data = ioread32(tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
+	iowrite32(data | XIL_AXI_TIMER_CSR_ENABLE_INT_MASK | XIL_AXI_TIMER_CSR_AUTO_RELOAD_MASK,
 			tp->base_addr + XIL_AXI_TIMER_TCSR_OFFSET);
 
 	// Start Timer
